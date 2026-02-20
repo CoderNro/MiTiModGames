@@ -1,21 +1,25 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
+#import <CoreLocation/CoreLocation.h>
 
 // ═══════════════════════════════════════════
-//  HUD — FPS + Pin + Tên thiết bị
+//  HUD — FPS + Pin + Giờ VN + Vị trí
 // ═══════════════════════════════════════════
 
-@interface MiTiHUD : NSObject
-+ (void)start;
+@interface MiTiHUD : NSObject <CLLocationManagerDelegate>
++ (void)start];
 @end
 
 @implementation MiTiHUD {
-    CADisplayLink *_displayLink;
-    NSInteger      _frameCount;
-    CFTimeInterval _lastTime;
-    UIWindow      *_hudWindow;
-    UILabel       *_hudLabel;
+    CADisplayLink    *_displayLink;
+    NSInteger         _frameCount;
+    CFTimeInterval    _lastTime;
+    UIWindow         *_hudWindow;
+    UILabel          *_hudLabel;
+    NSInteger         _colorIndex;
+    CLLocationManager *_locManager;
+    NSString          *_cityName;
 }
 
 + (instancetype)shared {
@@ -43,25 +47,59 @@
     _hudWindow.rootViewController.view.backgroundColor = [UIColor clearColor];
     [_hudWindow makeKeyAndVisible];
 
-    // HUD bar
+    // HUD bar — canh giữa
     UIView *bar = [[UIView alloc] initWithFrame:CGRectMake(0, 44, screen.size.width, 22)];
-    bar.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.55];
+    bar.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.6];
     [_hudWindow.rootViewController.view addSubview:bar];
 
-    _hudLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 0, screen.size.width - 16, 22)];
+    _hudLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, screen.size.width, 22)];
+    _hudLabel.textAlignment = NSTextAlignmentCenter;
     _hudLabel.font = [UIFont boldSystemFontOfSize:10];
-    _hudLabel.textColor = [UIColor colorWithRed:0.4 green:1.0 blue:0.4 alpha:1];
-    _hudLabel.text = @"@Copyright:MiTiModGames";
+    _hudLabel.textColor = [UIColor greenColor];
+    _hudLabel.text = @"©MiTiModGames";
     [bar addSubview:_hudLabel];
 
-    // Bật pin monitoring
+    _colorIndex = 0;
+    _cityName   = @"Đang tải...";
+
+    // Bật pin
     [UIDevice currentDevice].batteryMonitoringEnabled = YES;
 
-    // DisplayLink đếm FPS
+    // Vị trí
+    _locManager = [[CLLocationManager alloc] init];
+    _locManager.delegate = self;
+    _locManager.desiredAccuracy = kCLLocationAccuracyKilometer;
+    [_locManager requestWhenInUseAuthorization];
+    [_locManager startUpdatingLocation];
+
+    // DisplayLink
     _frameCount = 0;
     _lastTime   = CACurrentMediaTime();
     _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
     [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+}
+
+// Màu cầu vồng đổi liên tục
+- (UIColor *)rainbowColor {
+    NSArray *colors = @[
+        [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1], // đỏ
+        [UIColor colorWithRed:1.0 green:0.6 blue:0.0 alpha:1], // cam
+        [UIColor colorWithRed:1.0 green:1.0 blue:0.0 alpha:1], // vàng
+        [UIColor colorWithRed:0.2 green:1.0 blue:0.2 alpha:1], // xanh lá
+        [UIColor colorWithRed:0.0 green:0.8 blue:1.0 alpha:1], // xanh dương
+        [UIColor colorWithRed:0.6 green:0.2 blue:1.0 alpha:1], // tím
+        [UIColor colorWithRed:1.0 green:0.2 blue:0.8 alpha:1], // hồng
+    ];
+    _colorIndex = (_colorIndex + 1) % colors.count;
+    return colors[_colorIndex];
+}
+
+// Lấy giờ Việt Nam
+- (NSString *)vnTime {
+    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+    fmt.timeZone   = [NSTimeZone timeZoneWithName:@"Asia/Ho_Chi_Minh"];
+    fmt.dateFormat = @"HH:mm:ss dd/MM/yyyy";
+    return [fmt stringFromDate:[NSDate date]];
 }
 
 - (void)tick:(CADisplayLink *)link {
@@ -74,39 +112,34 @@
         _frameCount = 0;
         _lastTime   = now;
 
-        // Pin
         float battery = [UIDevice currentDevice].batteryLevel * 100;
-        NSString *batStr = battery < 0
-            ? @"N/A"
-            : [NSString stringWithFormat:@"%.0f%%", battery];
-
-        // Tên thiết bị
-        NSString *device = [UIDevice currentDevice].name;
-
-        // FPS màu theo mức
-        UIColor *fpsColor;
-        if (fps >= 55)      fpsColor = [UIColor colorWithRed:0.2 green:1.0 blue:0.3 alpha:1]; // xanh
-        else if (fps >= 30) fpsColor = [UIColor colorWithRed:1.0 green:0.8 blue:0.0 alpha:1]; // vàng
-        else                fpsColor = [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1]; // đỏ
+        NSString *bat = battery < 0 ? @"N/A" : [NSString stringWithFormat:@"%.0f%%", battery];
+        NSString *time = [self vnTime];
+        NSString *city = _cityName;
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            NSString *text = [NSString stringWithFormat:
-                @"©MiTiModGames  FPS:%ld  🔋%@  📱%@  Zalo:0559919099",
-                (long)fps, batStr, device];
-
-            NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] initWithString:text];
-            NSRange fpsRange = [text rangeOfString:[NSString stringWithFormat:@"FPS:%ld", (long)fps]];
-            if (fpsRange.location != NSNotFound)
-                [attr addAttribute:NSForegroundColorAttributeName value:fpsColor range:fpsRange];
-            [attr addAttribute:NSForegroundColorAttributeName
-                         value:[UIColor colorWithRed:0.4 green:1.0 blue:0.4 alpha:1]
-                         range:NSMakeRange(0, text.length)];
-            if (fpsRange.location != NSNotFound)
-                [attr addAttribute:NSForegroundColorAttributeName value:fpsColor range:fpsRange];
-
-            self->_hudLabel.attributedText = attr;
+            self->_hudLabel.textColor = [self rainbowColor];
+            self->_hudLabel.text = [NSString stringWithFormat:
+                @"©MiTiModGames  FPS:%ld  🔋%@  📍%@  🕐%@  Zalo:0559919099",
+                (long)fps, bat, city, time];
         });
     }
+}
+
+// CLLocationManager delegate
+- (void)locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray<CLLocation *> *)locations {
+    CLLocation *loc = locations.lastObject;
+    CLGeocoder *geo = [[CLGeocoder alloc] init];
+    [geo reverseGeocodeLocation:loc completionHandler:^(NSArray *marks, NSError *err) {
+        if (marks.count > 0) {
+            CLPlacemark *mark = marks[0];
+            NSString *city = mark.locality ?: mark.administrativeArea ?: @"Việt Nam";
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self->_cityName = city;
+            });
+        }
+    }];
+    [manager stopUpdatingLocation];
 }
 
 @end
@@ -137,13 +170,14 @@
         UIWindow *win = [[UIWindow alloc] initWithWindowScene:scene];
         win.windowLevel = UIWindowLevelAlert + 200;
         win.backgroundColor = [UIColor clearColor];
-        win.rootViewController = [[UIViewController alloc] init];
-        win.rootViewController.view.backgroundColor = [UIColor clearColor];
+        UIViewController *vc = [[UIViewController alloc] init];
+        vc.view.backgroundColor = [UIColor clearColor];
+        win.rootViewController = vc;
         [win makeKeyAndVisible];
 
         UIView *dim = [[UIView alloc] initWithFrame:screen];
         dim.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0];
-        [win.rootViewController.view addSubview:dim];
+        [vc.view addSubview:dim];
 
         UIView *card = [[UIView alloc] initWithFrame:CGRectMake(cardX, screen.size.height, cardW, cardH)];
         card.layer.cornerRadius  = 22;
@@ -165,7 +199,7 @@
         bg.startPoint = CGPointMake(0,0); bg.endPoint = CGPointMake(1,1);
         [cardBg.layer insertSublayer:bg atIndex:0];
         [card addSubview:cardBg];
-        [win.rootViewController.view addSubview:card];
+        [vc.view addSubview:card];
 
         CAGradientLayer *accent = [CAGradientLayer layer];
         accent.frame  = CGRectMake(0,0,cardW,3);
@@ -188,7 +222,8 @@
         lg.startPoint = CGPointMake(0,0); lg.endPoint = CGPointMake(1,1);
         [logo.layer insertSublayer:lg atIndex:0];
         UILabel *ll = [[UILabel alloc] initWithFrame:logo.bounds];
-        ll.text = @"🎮"; ll.font = [UIFont systemFontOfSize:22]; ll.textAlignment = NSTextAlignmentCenter;
+        ll.text = @"🎮"; ll.font = [UIFont systemFontOfSize:22];
+        ll.textAlignment = NSTextAlignmentCenter;
         [logo addSubview:ll]; [cardBg addSubview:logo];
 
         CABasicAnimation *pulse = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
@@ -206,26 +241,35 @@
         subLbl.font = [UIFont systemFontOfSize:11]; subLbl.textColor = [UIColor colorWithWhite:0.5 alpha:1];
         [cardBg addSubview:subLbl];
 
-        UIView *div = [[UIView alloc] initWithFrame:CGRectMake(16,116,cardW-32,1)];
-        div.backgroundColor = [UIColor colorWithWhite:1 alpha:0.07];
-        [cardBg addSubview:div];
+        UIView *divider = [[UIView alloc] initWithFrame:CGRectMake(16,116,cardW-32,1)];
+        divider.backgroundColor = [UIColor colorWithWhite:1 alpha:0.07];
+        [cardBg addSubview:divider];
 
+        // Links — dùng UIButton với block URL
         NSArray *links = @[
-            @{@"icon":@"▶️",@"title":@"YouTube", @"sub":@"@ymt139",    @"url":@"https://www.youtube.com/@ymt139",
+            @{@"icon":@"▶️",@"title":@"YouTube", @"sub":@"@ymt139",
+              @"url":@"https://www.youtube.com/@ymt139",
               @"r1":@0.9f,@"g1":@0.1f,@"b1":@0.1f,@"r2":@1.0f,@"g2":@0.3f,@"b2":@0.1f},
-            @{@"icon":@"🎵",@"title":@"TikTok",  @"sub":@"@yel123321",@"url":@"https://www.tiktok.com/@yel123321",
+            @{@"icon":@"🎵",@"title":@"TikTok",  @"sub":@"@yel123321",
+              @"url":@"https://www.tiktok.com/@yel123321",
               @"r1":@0.1f,@"g1":@0.1f,@"b1":@0.1f,@"r2":@0.3f,@"g2":@0.3f,@"b2":@0.3f},
-            @{@"icon":@"💬",@"title":@"Zalo",    @"sub":@"0559919099",@"url":@"https://zalo.me/0559919099",
+            @{@"icon":@"💬",@"title":@"Zalo",    @"sub":@"0559919099",
+              @"url":@"https://zalo.me/0559919099",
               @"r1":@0.0f,@"g1":@0.4f,@"b1":@0.9f,@"r2":@0.0f,@"g2":@0.6f,@"b2":@1.0f},
         ];
 
         CGFloat rowY = 124;
         for (NSDictionary *item in links) {
-            NSString *capturedURL = item[@"url"];
+            NSString *urlStr = item[@"url"];
+
             UIButton *row = [UIButton buttonWithType:UIButtonTypeCustom];
-            row.frame = CGRectMake(12,rowY,cardW-24,52);
-            row.layer.cornerRadius = 13; row.clipsToBounds = YES;
+            row.frame = CGRectMake(12, rowY, cardW-24, 52);
+            row.layer.cornerRadius = 13;
+            row.clipsToBounds = YES;
             row.backgroundColor = [UIColor colorWithWhite:1 alpha:0.05];
+
+            // Highlight khi bấm
+            [row setBackgroundImage:[self imageWithColor:[UIColor colorWithWhite:1 alpha:0.12]] forState:UIControlStateHighlighted];
 
             UIView *iconBg = [[UIView alloc] initWithFrame:CGRectMake(10,9,34,34)];
             iconBg.layer.cornerRadius = 10; iconBg.clipsToBounds = YES;
@@ -244,21 +288,26 @@
 
             UILabel *tl = [[UILabel alloc] initWithFrame:CGRectMake(52,8,cardW-90,20)];
             tl.text = item[@"title"]; tl.textColor = [UIColor whiteColor];
-            tl.font = [UIFont boldSystemFontOfSize:14]; [row addSubview:tl];
+            tl.font = [UIFont boldSystemFontOfSize:14];
+            tl.userInteractionEnabled = NO;
+            [row addSubview:tl];
 
             UILabel *sl = [[UILabel alloc] initWithFrame:CGRectMake(52,28,cardW-90,15)];
             sl.text = item[@"sub"]; sl.textColor = [UIColor colorWithWhite:0.45 alpha:1];
-            sl.font = [UIFont systemFontOfSize:11]; [row addSubview:sl];
+            sl.font = [UIFont systemFontOfSize:11];
+            sl.userInteractionEnabled = NO;
+            [row addSubview:sl];
 
             UILabel *arr = [[UILabel alloc] initWithFrame:CGRectMake(cardW-38,14,20,24)];
-            arr.text = @"›"; arr.textColor = [UIColor colorWithWhite:0.35 alpha:1];
-            arr.font = [UIFont boldSystemFontOfSize:20]; [row addSubview:arr];
+            arr.text = @"›"; arr.textColor = [UIColor colorWithWhite:0.4 alpha:1];
+            arr.font = [UIFont boldSystemFontOfSize:20];
+            arr.userInteractionEnabled = NO;
+            [row addSubview:arr];
 
-            objc_setAssociatedObject(row, "openBlock", ^{ 
-                NSURL *url = [NSURL URLWithString:capturedURL];
-                if (url) [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-            }, OBJC_ASSOCIATION_COPY_NONATOMIC);
-            [row addTarget:row action:@selector(handleTap) forControlEvents:UIControlEventTouchUpInside];
+            // Gắn URL vào button tag dùng associated object
+            objc_setAssociatedObject(row, "url", urlStr, OBJC_ASSOCIATION_COPY_NONATOMIC);
+            [row addTarget:[MiTiLinkHandler shared] action:@selector(buttonTapped:) forControlEvents:UIControlEventTouchUpInside];
+
             [cardBg addSubview:row];
             rowY += 58;
         }
@@ -288,18 +337,19 @@
         countLbl.textColor = [UIColor colorWithWhite:0.35 alpha:1];
         [cardBg addSubview:countLbl];
 
+        // Animate in
         [UIView animateWithDuration:0.08 animations:^{
             dim.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.5];
         }];
         [UIView animateWithDuration:0.45 delay:0 usingSpringWithDamping:0.75
               initialSpringVelocity:0.5 options:0 animations:^{
-            card.frame = CGRectMake(cardX,cardY,cardW,cardH);
+            card.frame = CGRectMake(cardX, cardY, cardW, cardH);
         } completion:nil];
 
         void (^closeMenu)(void) = ^{
             [UIView animateWithDuration:0.28 animations:^{
                 card.alpha = 0;
-                card.transform = CGAffineTransformMakeScale(0.92,0.92);
+                card.transform = CGAffineTransformMakeScale(0.92, 0.92);
                 dim.backgroundColor = [UIColor clearColor];
             } completion:^(BOOL d){ win.hidden = YES; }];
         };
@@ -311,7 +361,7 @@
             dispatch_async(dispatch_get_main_queue(), ^{
                 countLbl.text = [NSString stringWithFormat:@"Tự đóng sau %ld giây", (long)sec];
                 [UIView animateWithDuration:0.8 animations:^{
-                    bar.frame = CGRectMake(0,0,totalW * MAX(0,sec/10.0),4);
+                    bar.frame = CGRectMake(0, 0, totalW * MAX(0, sec/10.0), 4);
                 }];
                 if (sec <= 0) { [t invalidate]; closeMenu(); }
             });
@@ -324,12 +374,41 @@
     });
 }
 
+// Helper tạo ảnh màu cho highlight
++ (UIImage *)imageWithColor:(UIColor *)color {
+    CGRect r = CGRectMake(0,0,1,1);
+    UIGraphicsBeginImageContext(r.size);
+    [color setFill]; UIRectFill(r);
+    UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return img;
+}
+
 @end
 
-@implementation UIButton (MiTiTap)
-- (void)handleTap {
-    void (^block)(void) = objc_getAssociatedObject(self, "openBlock");
-    if (block) block();
+// ═══════════════════════════════════════════
+//  Link Handler — mở URL khi bấm button
+// ═══════════════════════════════════════════
+
+@interface MiTiLinkHandler : NSObject
++ (instancetype)shared;
+- (void)buttonTapped:(UIButton *)sender;
+@end
+
+@implementation MiTiLinkHandler
++ (instancetype)shared {
+    static MiTiLinkHandler *s;
+    static dispatch_once_t t;
+    dispatch_once(&t, ^{ s = [MiTiLinkHandler new]; });
+    return s;
+}
+- (void)buttonTapped:(UIButton *)sender {
+    NSString *urlStr = objc_getAssociatedObject(sender, "url");
+    if (!urlStr) return;
+    NSURL *url = [NSURL URLWithString:urlStr];
+    if (url) {
+        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+    }
 }
 @end
 
