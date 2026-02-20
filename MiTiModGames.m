@@ -2,13 +2,14 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import <CoreLocation/CoreLocation.h>
+#import <MiTiLinkHandler.h>
 
 // ═══════════════════════════════════════════
 //  HUD — FPS + Pin + Giờ VN + Vị trí
 // ═══════════════════════════════════════════
 
 @interface MiTiHUD : NSObject <CLLocationManagerDelegate>
-+ (void)start];
++ (void)start;
 @end
 
 @implementation MiTiHUD {
